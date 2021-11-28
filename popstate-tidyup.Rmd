@@ -1,0 +1,455 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## Libraries
+```{r message = FALSE, warning = FALSE}
+library(tidyverse); library(lubridate); library(glue); library(scales) # styler: off
+library(janitor); library(skimr); library(gt) # styler: off
+```
+
+## Globals
+```{r}
+census_region_fips_codes <-
+  c("91000", "92000", "93000", "94000", "95000", "96000", "97000", "98000")
+
+census_region_fips_names <-
+  c("New England", "Mideast", "Great Lakes", "Plains", "Southeast", "Southwest", "Rocky Mountain", "Far West")
+
+do_remove_used <- TRUE
+chart_globals <- list(
+  save_chart_width = 7,
+  save_chart_height = 5,
+  save_chart_dpi = 300,
+  save_chart_units = "in"
+)
+```
+
+## Load
+Eliminate footnotes. Eliminate asterisks. Integer year.
+```{r}
+library(readxl)
+s1_raw <- read_excel("data\\SAINC1.xls",
+  skip = 5,
+  col_types = "text"
+) %>%
+  clean_names() %>%
+  filter(str_detect(geo_fips, "^\\d{5}")) %>%
+  mutate(geo_name = str_replace_all(geo_name, "\\s\\*", ""))
+```
+
+## geo_table
+```{r}
+geo_table <- s1_raw %>%
+  select(geo_fips, state_name = geo_name)
+
+state_abbreviations <-
+  read_excel("~/Docs/Sheets/Economics/State Abbreviations.xlsx", 
+    sheet = "State Abbreviations") %>%
+    select(geo_fips, state_abbr, state_name)
+
+geo_table <- left_join(geo_table, state_abbreviations)
+```
+
+## Pivot
+Pivot.  Delete blank pop. Convert to numbers. Shed geo_name.
+```{r}
+s1_1 <- s1_raw %>%
+  pivot_longer(
+    cols = matches("x\\d{4}"),
+    names_to = "year",
+    values_to = "pop"
+  ) %>%
+  filter(pop != "(NA)") %>%
+  mutate(year = as.integer(str_sub(year, 2, 5))) %>%
+  mutate(pop = as.double(pop)) %>%
+  select(-geo_name)
+```
+
+## Changes
+U.S. table. Difference.
+```{r}
+s1_2 <- s1_1 %>%
+  arrange(year) %>%
+  group_by(geo_fips) %>%
+  mutate(
+    pop_change_yoy = pop - lag(pop, 1),
+    pop_change_yoy_pct = pop_change_yoy / lag(pop, 1)
+  ) %>%
+  ungroup()
+
+s1_2_us <- s1_2 %>%
+  filter(geo_fips == "00000") %>%
+  select(year, p = pop_change_yoy_pct)
+
+s1_3 <- s1_2 %>%
+  left_join(s1_2_us) %>%
+  mutate(pop_change_yoy_pct_diff = pop_change_yoy_pct - p) %>%
+  select(-p)
+```
+
+## Ranks
+```{r}
+pop_rank <- s1_3 %>%
+  filter(geo_fips != "00000" & geo_fips < "90000") %>%
+  group_by(year) %>%
+  mutate(
+    rank_pop = dense_rank(desc(pop)),
+    rank_pop_change_yoy = dense_rank(desc(pop_change_yoy)),
+    rank_pop_change_yoy_pct = dense_rank(desc(pop_change_yoy_pct)), 
+      rank_pop_change_yoy_pct_diff = 
+        dense_rank(desc(pop_change_yoy_pct_diff))
+  ) %>%
+  select(-pop, -pop_change_yoy, -pop_change_yoy_pct, -pop_change_yoy_pct_diff)
+
+s1_4 <- s1_3 %>%
+  left_join(pop_rank)
+```
+
+## Chart01
+chart01_orig is a good place to start tables, etc.
+```{r}
+chart01_orig <- s1_4 %>%
+  left_join(geo_table)
+
+chart01_no_regions <- chart01_orig %>%
+  filter(!(geo_fips %in% census_region_fips_codes))
+```
+
+
+## Save
+```{r}
+pop_state <- s1_4
+write_csv(pop_state, file = "data\\pop_state.csv", na = "")
+write_csv(chart01_orig, file = "data\\chart01_orig.csv", na = "")
+write_csv(chart01_no_regions, 
+  file = "data\\chart01_no_regions.csv", na = "")
+write_csv(geo_table, file = "data\\geo_table.csv", na = "")
+
+save(pop_state, geo_table, chart01_orig, chart01_no_regions,
+  file = "data\\pop_state.rdata")
+
+if (remove_used) remove(s1_raw)
+if (remove_used) remove(s1_1)
+if (remove_used) remove(s1_2)
+if (remove_used) remove(s1_2_us)
+if (remove_used) remove(s1_3)
+if (remove_used) remove(s1_4)
+if (remove_used) remove(pop_rank)
+```
+
+## Table01
+```{r}
+input_year <- 2001
+order_by_column <- "rank_pop_change_yoy_pct"
+
+chart01_no_regions %>%
+  filter(year == input_year) %>%
+  arrange_(c(order_by_column)) %>% 
+  gt() %>%
+  cols_move_to_start(
+    columns = c(year, state_name, 
+      pop, rank_pop,
+      pop_change_yoy, rank_pop_change_yoy,
+      pop_change_yoy_pct, rank_pop_change_yoy_pct,
+      pop_change_yoy_pct_diff,rank_pop_change_yoy_pct_diff)) %>%
+  fmt_number(decimals = 0,
+    columns = c(pop, pop_change_yoy), use_seps = TRUE) %>%
+  fmt_number(columns = c(pop_change_yoy_pct_diff), decimals = 4) %>%
+  fmt_percent(
+    columns = c(pop_change_yoy_pct), decimals = 2) %>%
+  gtsave("outs\\Table01.html")
+```
+
+
+## Chart 01
+```{r}
+
+library(geofacet)
+
+chart01 <- chart01_no_regions %>%
+  filter(geo_fips != "00000")
+  
+ggplot(
+  chart01,
+  aes(x = year, y = rank_pop)) +
+  geom_line(color = "steelblue", size = 0.5) +
+  facet_geo(~state_name, grid = us_state_grid2) +
+  theme(strip.text.x = element_text(
+    size = rel(0.85),
+    margin = margin(1, 1, 2, 1)
+  )) +
+  
+  scale_y_continuous(
+    limits = c(1, 52),
+    breaks = (c(1, 25, 50))) +
+  scale_x_continuous(
+    limits = (c(1929, 2020)),
+      breaks = c(1929, 1975, 2020)) +
+
+  theme(text = element_text(size = 7, color = "gray35")) +
+  theme(text = element_text(size = 7)) +
+  theme(axis.text.x = element_text(size = rel(0.85))) +
+  theme(axis.text.y = element_text(size = rel(0.85))) +
+
+  theme(panel.background = element_rect(fill = "white", color = NULL)) +
+  theme(strip.background = element_rect(fill = "white")) +
+  
+  # Grids
+theme(axis.ticks = element_line(
+  color = "gray50", size = 0.1)) +
+theme(panel.grid.minor = element_blank()) +
+theme(panel.grid.major = element_blank()) +
+theme(panel.grid.major.y = element_line(
+color = "grey", size = 0.1)) +
+theme(panel.grid.minor.y = element_blank()) +
+
+  # Labels
+  labs(
+    x = "", y = "",
+    title = "Populations of the States",
+    subtitle = glue("Showing rank, with 1 being greatest population."),
+    caption = "Source of original data is Bureau of Economic Analysis. Treats District of Columbia as a state."
+  ) +
+  theme(plot.caption.position = "plot", plot.caption = element_text(hjust = 0))
+
+ggsave(
+  file = "outs\\Population Rank.png",
+  width = chart_globals$save_chart_width,
+  height = chart_globals$save_chart_height,
+  dpi = chart_globals$save_chart_dpi,
+  units = chart_globals$save_chart_units
+)
+```
+
+## Chart 02
+```{r}
+
+library(geofacet)
+color_function <- function(n) {
+  case_when(
+    n >= 0 ~ "positive",
+    TRUE ~ "negative"
+  )
+}
+
+chart01 <- chart01_no_regions %>%
+  filter(geo_fips != "00000")
+  
+ggplot(
+  chart01,
+  aes(x = year, y = pop_change_yoy_pct)) +
+  geom_point(aes(
+    color = color_function(pop_change_yoy_pct)),
+    size = 0.2) +
+  facet_geo(~state_name, grid = us_state_grid2) +
+  theme(strip.text.x = element_text(
+    size = rel(0.85),
+    margin = margin(1, 1, 2, 1)
+  )) +
+  
+  scale_y_continuous(
+    limits = (c(-0.05, 0.1)),
+    labels = label_percent(accuracy = 1),
+    n.breaks = 3,
+    oob = scales::squish) +
+  scale_x_continuous(
+    limits = (c(1929, 2020)),
+      breaks = c(1929, 1975, 2020)) +
+  scale_color_manual( 
+    values = c("negative" = "red3", "positive" = "steelblue")) +
+  theme(legend.position = "none") +
+
+  theme(text = element_text(size = 7, color = "gray35")) +
+  theme(text = element_text(size = 7)) +
+  theme(axis.text.x = element_text(size = rel(0.85))) +
+  theme(axis.text.y = element_text(size = rel(0.85))) +
+
+  theme(panel.background = element_rect(fill = "white", color = NULL)) +
+  theme(strip.background = element_rect(fill = "white")) +
+  
+  # Grids
+theme(axis.ticks = element_line(
+  color = "gray50", size = 0.1)) +
+theme(panel.grid.minor = element_blank()) +
+theme(panel.grid.major = element_blank()) +
+theme(panel.grid.major.y = element_line(
+color = "grey", size = 0.1)) +
+theme(panel.grid.minor.y = element_blank()) +
+
+  # Labels
+  labs(
+    x = "", y = "",
+    title = "Populations of the States",
+    subtitle = glue("Showing percentage change from previous year"),
+    caption = "Source of original data is Bureau of Economic Analysis. Treats District of Columbia as a state."
+  ) +
+  theme(plot.caption.position = "plot", plot.caption = element_text(hjust = 0))
+
+ggsave(
+  file = "outs\\Population Change YoY.png",
+  width = chart_globals$save_chart_width,
+  height = chart_globals$save_chart_height,
+  dpi = chart_globals$save_chart_dpi,
+  units = chart_globals$save_chart_units
+)
+```
+
+
+
+
+```{r}
+chart01 %>%
+  group_by(geo_name) %>%
+  summarize(n = n()) %>%
+  ggplot(mapping = aes(x = geo_name, y = n)) +
+  geom_col() +
+  coord_flip()
+
+```
+
+
+```{r}
+pop_state %>%
+  group_by(year) %>%
+  summarize(n = n())
+
+```
+
+
+```{r}
+pop_state %>%
+  group_by(year) %>%
+  summarize(n = n()) %>%
+  ggplot(mapping = aes(x = year, y = n)) +
+  geom_col()
+
+```
+
+```{r}
+ranks_in_year <-
+  chart01 %>%
+  select(geo_name, year, pop) %>%
+  filter(!is.na(pop)) %>%
+  filter((geo_name != "United States") &
+    !(geo_name %in% census_region_fips_names)) %>%
+  arrange(year, desc(pop)) %>%
+  group_by(year) %>%
+  mutate(
+    rank_in_year = row_number(),
+    percent_rank = percent_rank(pop)
+  )
+
+```
+
+```{r unused, eval=FALSE, include=FALSE}
+population_of_us <-
+  popstate %>%
+  filter(geoname == "United States") %>%
+  select(geoname, year, population)
+
+ggplot(popstate) +
+  aes(x = year, y = population_change_yoy_pct * 100) +
+  geom_line(size = 0.5, colour = "#112446") +
+  labs(
+    x = "Year",
+    y = "Percent Change",
+    title = "Population Change Year over Year"
+  ) +
+  theme_gray() +
+  theme(plot.title = element_text(size = 17L)) +
+  facet_wrap(vars(geoname))
+
+# Population change since first
+popstate <- popstate %>%
+  arrange(geoname, year) %>%
+  group_by(geoname) %>%
+  mutate(
+    population_change_first =
+      ifelse(year != first(year),
+        population - first(population), NA
+      ),
+    population_change_first_pct =
+      ifelse(
+        year != first(year),
+        population_change_first / first(population), NA
+      )
+  )
+popstate_small <- popstate_small %>%
+  arrange(geoname, year) %>%
+  group_by(geoname) %>%
+  mutate(
+    population_change_first =
+      ifelse(year != first(year),
+        population - first(population), NA
+      ),
+    population_change_first_pct =
+      ifelse(
+        year != first(year),
+        population_change_first / first(population), NA
+      )
+  )
+
+popstate_states_only <- popstate %>%
+  filter((geoname != "United States") &
+    !(geoname %in% region_names))
+
+
+popstate %>%
+  filter(geoname != "Nevada") %>%
+  filter(geoname != "Arizona") %>%
+  filter(geoname != "Florida") %>%
+  filter(!(geoname %in% region_names)) %>%
+  ggplot() +
+  aes(x = year, y = population_change_first_pct * 100) +
+  geom_line(size = 1.0, color = "#112446") +
+  labs(
+    x = "Year",
+    y = "Percent Change",
+    title = "Population Change Since First"
+  ) +
+  theme_gray() +
+  theme(plot.title = element_text(size = 17L)) +
+  facet_wrap(~geoname)
+
+popstate %>%
+  filter((geoname != "United States") &
+    !(geoname %in% region_names)) %>%
+  left_join(ranks_in_year, c("geoname", "year")) %>%
+  ggplot() +
+  aes(x = year, y = rank_in_year) +
+  geom_step(size = 1, alpha = 0.5) +
+  scale_y_reverse() +
+  facet_wrap(~geoname, strip.position = (c("top"))) +
+  labs(
+    x = "Year",
+    y = "Rank (largest states at top)",
+    title = "State Population Ranks"
+  ) +
+  theme(plot.title = element_text(size = 16L))
+ggsave("test.jpg", device = "jpeg", dpi = 300, units = c("px"), width = 2000, height = 1500)
+
+
+
+
+
+
+
+
+popstate %>%
+  filter((geoname != "United States") &
+    !(geoname %in% region_names)) %>%
+  left_join(ranks_in_year, c("geoname", "year")) %>%
+  ggplot() +
+  aes(x = year, y = rank_in_year, color = geoname) +
+  geom_line(size = 1, alpha = .5) +
+  scale_y_reverse()
+
+ggplot(popstate_states_only) +
+  aes(x = population, y = population_change_yoy_pct) +
+  geom_point(alpha = 0.5) +
+  theme_gray()
+
+```
+

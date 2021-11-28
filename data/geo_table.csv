@@ -1,0 +1,61 @@
+geo_fips,state_name,state_abbr
+00000,United States,US
+01000,Alabama,AL
+02000,Alaska,AK
+04000,Arizona,AZ
+05000,Arkansas,AR
+06000,California,CA
+08000,Colorado,CO
+09000,Connecticut,CT
+10000,Delaware,DE
+11000,District of Columbia,DC
+12000,Florida,FL
+13000,Georgia,GA
+15000,Hawaii,HI
+16000,Idaho,ID
+17000,Illinois,IL
+18000,Indiana,IN
+19000,Iowa,IA
+20000,Kansas,KS
+21000,Kentucky,KY
+22000,Louisiana,LA
+23000,Maine,ME
+24000,Maryland,MD
+25000,Massachusetts,MA
+26000,Michigan,MI
+27000,Minnesota,MN
+28000,Mississippi,MS
+29000,Missouri,MO
+30000,Montana,MT
+31000,Nebraska,NE
+32000,Nevada,NV
+33000,New Hampshire,NH
+34000,New Jersey,NJ
+35000,New Mexico,NM
+36000,New York,NY
+37000,North Carolina,NC
+38000,North Dakota,ND
+39000,Ohio,OH
+40000,Oklahoma,OK
+41000,Oregon,OR
+42000,Pennsylvania,PA
+44000,Rhode Island,RI
+45000,South Carolina,SC
+46000,South Dakota,SD
+47000,Tennessee,TN
+48000,Texas,TX
+49000,Utah,UT
+50000,Vermont,VT
+51000,Virginia,VA
+53000,Washington,WA
+54000,West Virginia,WV
+55000,Wisconsin,WI
+56000,Wyoming,WY
+91000,New England,
+92000,Mideast,
+93000,Great Lakes,
+94000,Plains,
+95000,Southeast,
+96000,Southwest,
+97000,Rocky Mountain,
+98000,Far West,
